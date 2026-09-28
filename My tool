@@ -1,0 +1,318 @@
+"""
+castle_patrol.py
+Builds a simple castle in Maya with a soldier patrolling the top of the
+walls along a fixed, looping path.
+
+TWO COMMANDS
+    build_castle_patrol()    build the castle + soldier (ONE undo step)
+    delete_castle_patrol()   delete only what this tool made (ONE undo step)
+
+HOW TO RUN
+    Maya > Windows > General Editors > Script Editor > Python tab
+    Paste this whole file, select all, Ctrl+Enter.  -> builds the castle
+    Then Play to watch the patrol.
+    Ctrl+Z once                                      -> everything is gone
+    Later, type  delete_castle_patrol()  in the Python tab and Ctrl+Enter
+                                                     -> removes the castle
+
+DESIGN RULES (assignment requirements)
+ 1. Undo in one step: every build/delete is wrapped in
+    cmds.undoInfo(openChunk=True) ... cmds.undoInfo(closeChunk=True).
+ 2. Delete only what you made: everything in the scene hierarchy goes under
+    ONE group. That group (and the shaders, which Maya can't put in a group)
+    carry a hidden marker attribute. Deleting = deleting the marked group and
+    marked shaders. Nothing is ever found or deleted by name.
+"""
+
+import maya.cmds as cmds
+
+# ------------------------------------------------------------------
+# Settings (tweak these)
+# ------------------------------------------------------------------
+WALL_HALF = 10.0      # distance from centre to each wall's centre line
+WALL_H = 6.0          # wall height (the soldier walks on top of this)
+WALL_T = 3.0          # wall thickness (the walkway)
+MERLON_H = 1.0        # height of the battlement blocks
+TOWER_R = 2.0         # corner tower radius
+TOWER_H = 9.0         # corner tower height
+TOWER_OFF = 12.0      # tower centre distance from middle (outside the path)
+
+PATROL_INSET = 9.2    # half-size of the square patrol path (on top of the wall)
+LAP_FRAMES = 720      # frames for one full lap (720 = 30 s at 24 fps)
+STEP_FRAMES = 24      # frames for one full walk cycle (left + right step)
+TURN_FRAMES = 12      # frames the soldier takes to turn at each corner
+
+ROOT_NAME = "Castle_GRP"
+TAG = "castlePatrolTool"   # hidden marker attribute: "this tool made me"
+
+
+# ------------------------------------------------------------------
+# Node handles: UUIDs instead of names (names can clash, UUIDs can't)
+# ------------------------------------------------------------------
+def new_node():
+    """UUID of the node that was just created (Maya selects new nodes)."""
+    return cmds.ls(selection=True, uuid=True)[0]
+
+
+def N(uid):
+    """Turn a UUID back into the node's current full path."""
+    return cmds.ls(uid, long=True)[0]
+
+
+def tag(node):
+    """Mark a node as made by this tool."""
+    cmds.addAttr(node, longName=TAG, attributeType="bool",
+                 defaultValue=True, hidden=True)
+
+
+def find_owned():
+    """Full paths of every node this tool made (found by marker, not name)."""
+    return cmds.ls("*." + TAG, objectsOnly=True, recursive=True, long=True) or []
+
+
+# ------------------------------------------------------------------
+# Small builders
+# ------------------------------------------------------------------
+def make_shader(name, rgb):
+    shader = cmds.shadingNode("lambert", asShader=True, name=name)
+    cmds.setAttr(shader + ".color", rgb[0], rgb[1], rgb[2], type="double3")
+    sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True,
+                   name=shader + "SG")
+    cmds.connectAttr(shader + ".outColor", sg + ".surfaceShader", force=True)
+    tag(shader)
+    tag(sg)
+    return sg
+
+
+def paint(uid, sg):
+    cmds.sets(N(uid), edit=True, forceElement=sg)
+
+
+def place(uid, pos, sg):
+    cmds.move(pos[0], pos[1], pos[2], N(uid))
+    paint(uid, sg)
+    return uid
+
+
+def box(name, w, h, d, pos, sg):
+    cmds.polyCube(name=name, w=w, h=h, d=d)
+    return place(new_node(), pos, sg)
+
+
+def cylinder(name, r, h, pos, sg, sx=16):
+    cmds.polyCylinder(name=name, r=r, h=h, sx=sx)
+    return place(new_node(), pos, sg)
+
+
+def cone(name, r, h, pos, sg, sx=16):
+    cmds.polyCone(name=name, r=r, h=h, sx=sx)
+    return place(new_node(), pos, sg)
+
+
+def group(uids, name):
+    cmds.group([N(u) for u in uids], name=name)
+    return new_node()
+
+
+def limb(name, w, h, d, pivot, sg):
+    """A box hanging from a joint (hip/shoulder); rotate the group to swing it."""
+    cube = box(name, w, h, d, (pivot[0], pivot[1] - h / 2.0, pivot[2]), sg)
+    grp = group([cube], name + "_GRP")
+    cmds.xform(N(grp), worldSpace=True, pivots=pivot)
+    return grp
+
+
+# ------------------------------------------------------------------
+# Castle
+# ------------------------------------------------------------------
+def build_castle(sh):
+    parts = []
+
+    cmds.polyPlane(name="ground", w=80, h=80, sx=1, sy=1)
+    ground = new_node()
+    paint(ground, sh["grass"])
+    parts.append(ground)
+
+    span = TOWER_OFF * 2
+    y = WALL_H / 2.0
+    parts.append(box("wall_N", span, WALL_H, WALL_T, (0, y, WALL_HALF), sh["stone"]))
+    parts.append(box("wall_S", span, WALL_H, WALL_T, (0, y, -WALL_HALF), sh["stone"]))
+    parts.append(box("wall_E", WALL_T, WALL_H, span, (WALL_HALF, y, 0), sh["stone"]))
+    parts.append(box("wall_W", WALL_T, WALL_H, span, (-WALL_HALF, y, 0), sh["stone"]))
+
+    outer = WALL_HALF + WALL_T / 2.0 - 0.35
+    my = WALL_H + MERLON_H / 2.0
+    merlons = []
+    t = -9.0
+    while t <= 9.0 + 1e-6:
+        for s in (1, -1):
+            merlons.append(box("merlon#", 0.8, MERLON_H, 0.7, (t, my, s * outer), sh["stone"]))
+            merlons.append(box("merlon#", 0.7, MERLON_H, 0.8, (s * outer, my, t), sh["stone"]))
+        t += 1.6
+    parts.append(group(merlons, "merlons_GRP"))
+
+    towers = []
+    for sx in (1, -1):
+        for sz in (1, -1):
+            x, z = sx * TOWER_OFF, sz * TOWER_OFF
+            towers.append(cylinder("tower#", TOWER_R, TOWER_H,
+                                   (x, TOWER_H / 2.0, z), sh["stone"]))
+            towers.append(cone("towerRoof#", TOWER_R + 0.4, 3.5,
+                               (x, TOWER_H + 1.75, z), sh["roof"]))
+    parts.append(group(towers, "towers_GRP"))
+
+    parts.append(box("gate", 3.2, 4.0, 0.3,
+                     (0, 2.0, WALL_HALF + WALL_T / 2.0 + 0.1), sh["wood"]))
+
+    parts.append(box("keep", 7, 10, 7, (0, 5, 0), sh["stone"]))
+    keep_roof = cone("keepRoof", 5.2, 4, (0, 12, 0), sh["roof"], sx=4)
+    cmds.rotate(0, 45, 0, N(keep_roof))
+    parts.append(keep_roof)
+
+    return group(parts, "CastleGeo_GRP")
+
+
+# ------------------------------------------------------------------
+# Soldier (built facing +Z, feet at the origin)
+# ------------------------------------------------------------------
+def build_soldier(sh):
+    leg_l = limb("legL", 0.22, 0.9, 0.25, (0.15, 0.9, 0), sh["pants"])
+    leg_r = limb("legR", 0.22, 0.9, 0.25, (-0.15, 0.9, 0), sh["pants"])
+    torso = box("torso", 0.6, 0.7, 0.35, (0, 1.25, 0), sh["tunic"])
+    arm_l = limb("armL", 0.16, 0.65, 0.18, (0.4, 1.58, 0), sh["tunic"])
+    arm_r = limb("armR", 0.16, 0.65, 0.18, (-0.4, 1.58, 0), sh["tunic"])
+
+    cmds.polySphere(name="head", r=0.18)
+    head = place(new_node(), (0, 1.8, 0), sh["skin"])
+    helmet = cone("helmet", 0.24, 0.3, (0, 2.02, 0), sh["metal"], sx=12)
+
+    shaft = cylinder("spearShaft", 0.03, 2.4, (-0.52, 1.3, 0.1), sh["wood"], sx=8)
+    tip = cone("spearTip", 0.06, 0.25, (-0.52, 2.62, 0.1), sh["metal"], sx=8)
+    spear = group([shaft, tip], "spear_GRP")
+    cmds.parent(N(spear), N(arm_r))
+
+    soldier = group([leg_l, leg_r, torso, arm_l, arm_r, head, helmet], "Soldier_GRP")
+    cmds.xform(N(soldier), worldSpace=True, pivots=(0, 0, 0))
+    return soldier, leg_l, leg_r, arm_l
+
+
+def animate_walk(leg_l, leg_r, arm_l):
+    """Looping leg/arm swing. Left arm swings opposite the left leg."""
+    for uid, phase, amp in ((leg_l, 1, 25), (leg_r, -1, 25), (arm_l, -1, 20)):
+        node = N(uid)
+        for t, sign in ((1, 1), (1 + STEP_FRAMES / 2.0, -1), (1 + STEP_FRAMES, 1)):
+            cmds.setKeyframe(node, attribute="rotateX", t=t, v=sign * phase * amp)
+        cmds.setInfinity(node, attribute="rotateX", preInfinite="cycle", postInfinite="cycle")
+
+
+# ------------------------------------------------------------------
+# Patrol: a fixed square path, keyed directly on the soldier group
+# ------------------------------------------------------------------
+def build_patrol(soldier):
+    """Walk the soldier around the corners of a square on top of the walls.
+    Keys go straight on the soldier (no motion-path node outside our group),
+    and a curve is drawn so the fixed path is visible."""
+    s = PATROL_INSET
+    y = WALL_H
+    corners = [(-s, -s), (s, -s), (s, s), (-s, s)]   # walking anticlockwise from above
+    headings = [90, 0, -90, -180]                    # rotateY facing each edge's direction
+    edge = LAP_FRAMES / 4.0
+    node = N(soldier)
+
+    # Position: one key per corner, straight lines between them, lap loops
+    for i in range(5):
+        x, z = corners[i % 4]
+        t = 1 + i * edge
+        cmds.setKeyframe(node, attribute="translateX", t=t, v=x)
+        cmds.setKeyframe(node, attribute="translateZ", t=t, v=z)
+    cmds.setAttr(node + ".translateY", y)
+    for attr in ("translateX", "translateZ"):
+        cmds.keyTangent(node, attribute=attr,
+                        inTangentType="linear", outTangentType="linear")
+        cmds.setInfinity(node, attribute=attr,
+                         preInfinite="cycle", postInfinite="cycle")
+
+    # Facing: turn 90 degrees left in the last few frames before each corner
+    cmds.setKeyframe(node, attribute="rotateY", t=1, v=headings[0])
+    for i in range(1, 5):
+        t = 1 + i * edge
+        before = headings[i - 1]
+        after = headings[i] if i < 4 else headings[0] - 360   # keep turning the same way
+        cmds.setKeyframe(node, attribute="rotateY", t=t - TURN_FRAMES, v=before)
+        cmds.setKeyframe(node, attribute="rotateY", t=t, v=after)
+    cmds.keyTangent(node, attribute="rotateY",
+                    inTangentType="linear", outTangentType="linear")
+    cmds.setInfinity(node, attribute="rotateY",
+                     preInfinite="cycleRelative", postInfinite="cycleRelative")
+
+    # Visible path (display only)
+    pts = [(cx, y, cz) for cx, cz in corners] + [(corners[0][0], y, corners[0][1])]
+    cmds.curve(name="PatrolPath", degree=1, point=pts)
+    return new_node()
+
+
+# ------------------------------------------------------------------
+# Command 1: build
+# ------------------------------------------------------------------
+def _delete_owned():
+    for node in find_owned():
+        if cmds.objExists(node):       # children vanish with their group
+            cmds.delete(node)
+
+
+def build_castle_patrol():
+    """Build castle + patrolling soldier. One Ctrl+Z removes all of it."""
+    cmds.undoInfo(openChunk=True, chunkName="Build Castle Patrol")
+    try:
+        _delete_owned()   # re-running replaces our old castle, never anyone else's
+
+        sh = {
+            "stone": make_shader("castleStone_MAT", (0.55, 0.53, 0.50)),
+            "roof":  make_shader("castleRoof_MAT",  (0.45, 0.12, 0.10)),
+            "grass": make_shader("castleGrass_MAT", (0.25, 0.45, 0.20)),
+            "wood":  make_shader("castleWood_MAT",  (0.35, 0.22, 0.10)),
+            "tunic": make_shader("soldierTunic_MAT", (0.15, 0.25, 0.55)),
+            "pants": make_shader("soldierPants_MAT", (0.20, 0.20, 0.20)),
+            "skin":  make_shader("soldierSkin_MAT",  (0.90, 0.72, 0.58)),
+            "metal": make_shader("soldierMetal_MAT", (0.70, 0.70, 0.75)),
+        }
+
+        castle = build_castle(sh)
+        soldier, leg_l, leg_r, arm_l = build_soldier(sh)
+        animate_walk(leg_l, leg_r, arm_l)
+        path = build_patrol(soldier)
+
+        # ONE group holds everything the tool put in the scene hierarchy
+        root = group([castle, soldier, path], ROOT_NAME)
+        tag(N(root))
+        cmds.select(clear=True)
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+    # Timeline settings are not scene content, so they stay outside the chunk
+    cmds.playbackOptions(minTime=1, maxTime=LAP_FRAMES, animationStartTime=1,
+                         animationEndTime=LAP_FRAMES, loop="continuous")
+    cmds.currentTime(1)
+    print("Castle built. Press Play. Ctrl+Z once removes it; "
+          "delete_castle_patrol() also removes it.")
+
+
+# ------------------------------------------------------------------
+# Command 2: delete
+# ------------------------------------------------------------------
+def delete_castle_patrol():
+    """Delete the tool's group and shaders, and nothing else. One undo step."""
+    owned = find_owned()
+    if not owned:
+        print("Nothing to delete: no castle made by this tool in the scene.")
+        return
+    cmds.undoInfo(openChunk=True, chunkName="Delete Castle Patrol")
+    try:
+        _delete_owned()
+    finally:
+        cmds.undoInfo(closeChunk=True)
+    print("Deleted the castle made by this tool (Ctrl+Z brings it back).")
+
+
+if __name__ == "__main__":
+    build_castle_patrol()
