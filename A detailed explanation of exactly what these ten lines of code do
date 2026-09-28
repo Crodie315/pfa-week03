@@ -1,0 +1,29 @@
+1. TAG = "castlePatrolTool"
+The tool's name sticker. Everything the tool makes gets this sticker, so later it knows "this one is mine".
+
+2. return cmds.ls(selection=True, uuid=True)[0]
+Each new object gets an ID number, like a student ID. Names can be the same for two objects, but the ID number never repeats and never changes. This line writes down the ID of the object just made.
+
+3. return cmds.ls(uid, long=True)[0]
+This looks up an object by its ID number, the way a teacher finds a student with their ID card instead of calling out a name that two students might share.
+
+4. cmds.addAttr(node, longName=TAG, ...)
+This sticks the name sticker onto an object. The sticker is hidden, so you don't see it in Maya, but the tool can find it.
+
+5. return cmds.ls("*." + TAG, ...)
+This searches the whole scene for the sticker and collects only those objects. It doesn't care what objects are called, only whether they have the sticker. Your own objects never get picked up by mistake.
+
+6. cmds.polyCube(...)
+This makes one box. The whole castle is built from boxes: walls, battlements, gate. The soldier's body, arms and legs are boxes too.
+
+7. cmds.xform(..., pivots=pivot)
+This moves the turning point of a leg or arm to the hip or shoulder. It's like putting the hinge of a door in the right place: the leg swings from the hip instead of spinning around its middle.
+
+8. cmds.setInfinity(..., "cycle")
+The code only animates one step. This line says "repeat it forever", so the soldier keeps walking without anyone having to animate every step.
+
+9. cmds.undoInfo(openChunk=True, ...)
+This opens a box that collects every action that follows. Everything done after this goes into the same box, so Ctrl+Z can take out the whole box at once.
+
+10. cmds.undoInfo(closeChunk=True)
+This closes the box. It's placed so that it always happens, even if something goes wrong halfway. An open box would mess up Ctrl+Z.
