@@ -27,3 +27,14 @@ This opens a box that collects every action that follows. Everything done after 
 
 10. cmds.undoInfo(closeChunk=True)
 This closes the box. It's placed so that it always happens, even if something goes wrong halfway. An open box would mess up Ctrl+Z.
+
+The loop: how the battlements get built
+
+    t = -9.0
+    while t <= 9.0 + 1e-6:
+        for s in (1, -1):
+            merlons.append(box("merlon#", 0.8, MERLON_H, 0.7, (t, my, s * outer), sh["stone"]))
+            merlons.append(box("merlon#", 0.7, MERLON_H, 0.8, (s * outer, my, t), sh["stone"]))
+        t += 1.6
+
+This loop (in build_castle()) puts the little stone blocks on top of all four walls. The variable t is a position along a wall. It starts at -9, and each time around the loop it moves 1.6 units further, until it passes 9. That gives 12 stops: -9, -7.4, -5.8 and so on up to 8.6. At every stop, the inner loop runs twice, once with s = 1 and once with s = -1. With s = 1 the block goes on the positive side, with s = -1 it goes on the opposite side. Each pass makes two blocks: the first line lays a block along the north or south wall (t goes along X), the second lays one along the east or west wall (the same t, but along Z). So every stop gives 4 blocks, one per wall, and the whole loop makes 12 x 4 = 48 blocks. Every block is added to the merlons list, and after the loop they are all put into one group, merlons_GRP. The odd-looking "+ 1e-6" is a safety margin: adding 1.6 again and again gives tiny rounding errors in a computer, so if the step were changed and t landed almost exactly on 9, the margin makes sure that last block is not skipped. With the current step of 1.6 the last stop is 8.6, so here it changes nothing. Changing 1.6 changes the gap between blocks without touching anything else.
