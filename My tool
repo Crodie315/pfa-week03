@@ -39,7 +39,7 @@ TOWER_OFF = 12.0      # tower centre distance from middle (outside the path)
 
 PATROL_INSET = 9.2    # half-size of the square patrol path (on top of the wall)
 LAP_FRAMES = 720      # frames for one full lap (720 = 30 s at 24 fps)
-STEP_FRAMES = 24      # frames for one full walk cycle (left + right step)
+STEP_FRAMES = 16      # frames for one full walk cycle (left + right step)
 TURN_FRAMES = 12      # frames the soldier takes to turn at each corner
 
 ROOT_NAME = "Castle_GRP"
